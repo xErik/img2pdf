@@ -2,6 +2,12 @@
 CHANGES
 =======
 
+0.2.2
+-----
+
+ - support justify-option
+
+
 0.2.1
 -----
 

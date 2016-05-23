@@ -28,7 +28,7 @@ from enum import Enum
 from io import BytesIO
 import logging
 
-__version__ = "0.2"
+__version__ = "0.2.2"
 default_dpi = 96.0
 papersizes = {
     "letter": "8.5inx11in",
@@ -73,6 +73,8 @@ Unit = Enum('Unit', 'pt cm mm inch')
 
 ImgUnit = Enum('ImgUnit', 'pt cm mm inch perc dpi')
 
+JustifyMode = Enum('JustifyMode', 'northwest north northeast \
+east center west southwest south southeast book')
 
 class NegativeDimensionError(Exception):
     pass
@@ -694,7 +696,7 @@ def in_to_pt(length):
     return 72*length
 
 
-def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
+def get_layout_fun(pagesize, imgsize, border, fit, auto_orient, justify):
     def fitfun(fit, imgwidth, imgheight, fitwidth, fitheight):
         if fitwidth is None and fitheight is None:
             raise ValueError("fitwidth and fitheight cannot both be None")
@@ -786,6 +788,52 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
             return default()
         else:
             raise NotImplementedError
+    def justify_image(justify, pagewidth, pageheight, \
+        imgheightpdf, imgwidthpdf, border):
+        # border depends on the FIT mode, it is not necessarily the border
+        # specified by the user: a FIT mode may ignore the border and set
+        # it implicitly to (0,0).
+        borderTop=border[0]
+        borderBottom=border[0]
+        borderLeft=border[1]
+        borderRight=border[1]
+        # x axis
+        xleft=0 + borderLeft
+        xcenter=(pagewidth - imgwidthpdf)/2.0
+        xright=(pagewidth - imgwidthpdf) - borderRight
+        # y axis is inverted
+        ybottom=0 + borderBottom
+        ycenter=(pageheight - imgheightpdf)/2.0
+        ytop=(pageheight - imgheightpdf) - borderTop
+        # default mode is JustifyMode.center
+        imgxpdf = xcenter
+        imgypdf = ycenter
+        # switch through justify-modes
+        if justify is JustifyMode.northwest:
+            imgxpdf = xleft
+            imgypdf = ytop
+        elif justify is JustifyMode.north:
+            imgxpdf = xcenter
+            imgypdf = ytop
+        elif justify is JustifyMode.northeast:
+            imgxpdf = xright
+            imgypdf = ytop
+        elif justify is JustifyMode.west:
+            imgxpdf = xleft
+            imgypdf = ycenter
+        elif justify is JustifyMode.east:
+            imgxpdf = xright
+            imgypdf = ycenter
+        elif justify is JustifyMode.southwest:
+            imgxpdf = xleft
+            imgypdf = ybottom
+        elif justify is JustifyMode.south:
+            imgxpdf = xcenter
+            imgypdf = ybottom
+        elif justify is JustifyMode.southeast:
+            imgxpdf = xright
+            imgypdf = ybottom
+        return imgxpdf, imgypdf
     # if no layout arguments are given, then the image size is equal to the
     # page size and will be drawn with the default dpi
     if pagesize is None and imgsize is None and border is None:
@@ -796,7 +844,10 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
             imgheightpdf = px_to_pt(imgheightpx, ndpi[1])
             pagewidth = imgwidthpdf+2*border[1]
             pageheight = imgheightpdf+2*border[0]
-            return pagewidth, pageheight, imgwidthpdf, imgheightpdf
+            # respects border
+            imgxpdf, imgypdf = justify_image(justify, pagewidth, pageheight,
+                imgheightpdf, imgwidthpdf, border)
+            return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
         return layout_fun
     if border is None:
         border = (0, 0)
@@ -841,9 +892,14 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
                        fitwidth, fitheight)
             if pagewidth is None:
                 pagewidth = imgwidthpdf+border[1]*2
+                newborder[1] = border[1]
             if pageheight is None:
                 pageheight = imgheightpdf+border[0]*2
-            return pagewidth, pageheight, imgwidthpdf, imgheightpdf
+                newborder[0] = border[0]
+            # newborder is subject to auto_orient and needs to be respected
+            imgxpdf, imgypdf = justify_image(justify, pagewidth, pageheight,
+                imgheightpdf, imgwidthpdf, newborder)
+            return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
         return layout_fun
 
     def scale_imgsize(s, px, dpi):
@@ -866,16 +922,22 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
                            scale_imgsize(imgsize[1], imgheightpx, ndpi[1]))
             pagewidth = imgwidthpdf+2*border[1]
             pageheight = imgheightpdf+2*border[0]
-            return pagewidth, pageheight, imgwidthpdf, imgheightpdf
+            # image is always centered, border is respected
+            imgxpdf, imgypdf = justify_image(JustifyMode.center,
+                pagewidth, pageheight, imgheightpdf, imgwidthpdf, border)
+            return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
         return layout_fun
     if pagesize is not None and imgsize is not None:
         def layout_fun(imgwidthpx, imgheightpx, ndpi):
+            newborder = border
             if pagesize[0] is not None and pagesize[1] is not None and \
                     auto_orient and \
                     ((imgwidthpx > imgheightpx and
                       pagesize[0] < pagesize[1]) or
                      (imgwidthpx < imgheightpx and pagesize[0] > pagesize[1])):
                 pagewidth, pageheight = pagesize[1], pagesize[0]
+                newborder[0] = border[1]
+                newborder[1] = border[0]
             else:
                 pagewidth, pageheight = pagesize[0], pagesize[1]
             imgwidthpdf, imgheightpdf = \
@@ -883,7 +945,10 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
                        px_to_pt(imgheightpx, ndpi[1]),
                        scale_imgsize(imgsize[0], imgwidthpx, ndpi[0]),
                        scale_imgsize(imgsize[1], imgheightpx, ndpi[1]))
-            return pagewidth, pageheight, imgwidthpdf, imgheightpdf
+            # newborder respects auto_orient
+            imgxpdf, imgypdf = justify_image(justify, pagewidth, pageheight,
+                imgheightpdf, imgwidthpdf, newborder)
+            return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
         return layout_fun
     raise NotImplementedError
 
@@ -891,7 +956,10 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient):
 def default_layout_fun(imgwidthpx, imgheightpx, ndpi):
     imgwidthpdf = pagewidth = px_to_pt(imgwidthpx, ndpi[0])
     imgheightpdf = pageheight = px_to_pt(imgheightpx, ndpi[1])
-    return pagewidth, pageheight, imgwidthpdf, imgheightpdf
+    # image is centered, border is ignored
+    imgxpdf, imgypdf = justify_image(JustifyMode.center, pagewidth, pageheight,
+        imgheightpdf, imgwidthpdf, (0,0))
+    return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
 
 
 def get_fixed_dpi_layout_fun(fixed_dpi):
@@ -927,7 +995,7 @@ def convert(*images, title=None,
                  viewer_fit_window, viewer_center_window, viewer_fullscreen,
                  with_pdfrw)
 
-    for img in images:
+    for idximg, img in enumerate(images):
         # img is allowed to be a path, a binary string representing image data
         # or a file-like object (really anything that implements read())
         try:
@@ -944,19 +1012,23 @@ def convert(*images, title=None,
                 # name so we now try treating it as raw image content
                 rawdata = img
 
-        for color, ndpi, imgformat, imgdata, imgwidthpx, imgheightpx \
-                in read_images(rawdata, colorspace, first_frame_only):
-            pagewidth, pageheight, imgwidthpdf, imgheightpdf = \
-                layout_fun(imgwidthpx, imgheightpx, ndpi)
+        for color, ndpi, imgformat, imgdata, imgwidthpx, imgheightpx in \
+            read_images(rawdata, colorspace, first_frame_only):
+
+            # layout_fun is either a list of definitions or a single definition
+            # In case of list, iterate over its definitions
+            if not isinstance(layout_fun, (list)):
+                layout_fun_actual = layout_fun
+            else:
+                layout_fun_actual = layout_fun[idximg % len(layout_fun)]
+            pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf = \
+                layout_fun_actual(imgwidthpx, imgheightpx, ndpi)
             if pagewidth < 3.00 or pageheight < 3.00:
                 logging.warning("pdf width or height is below 3.00 - too "
                                 "small for some viewers!")
             elif pagewidth > 14400.0 or pageheight > 14400.0:
                 raise PdfTooLargeError(
                         "pdf width or height must not exceed 200 inches.")
-            # the image is always centered on the page
-            imgxpdf = (pagewidth - imgwidthpdf)/2.0
-            imgypdf = (pageheight - imgheightpdf)/2.0
             pdf.add_imagepage(color, imgwidthpx, imgheightpx, imgformat,
                               imgdata, imgwidthpdf, imgheightpdf, imgxpdf,
                               imgypdf, pagewidth, pageheight)
@@ -1162,6 +1234,12 @@ def parse_fitarg(string):
         if m.name == string.lower():
             return m
     raise argparse.ArgumentTypeError("unknown fit mode: %s" % string)
+
+def parse_justifyarg(string):
+    for m in JustifyMode:
+        if m.name == string.lower():
+            return m
+    raise argparse.ArgumentTypeError("unknown justify mode: %s" % string)
 
 
 def parse_panes(string):
@@ -1470,6 +1548,9 @@ the image size will be calculated from the page size, respecting the border
 setting. If the --border option is given while both the --pagesize and
 --imgsize options are passed, then the --border option will be ignored.
 
+The --justify option places the image on the page, if the image is smaller
+than the page. Borders are respected.
+
 ''' % default_dpi)
 
     sizeargs.add_argument(
@@ -1502,12 +1583,10 @@ because images will always be centered on the page.
     sizeargs.add_argument(
             '-f', '--fit', metavar='FIT', type=parse_fitarg,
             default=FitMode.into, help='''
-
 If --imgsize is given, fits the image using these dimensions. Otherwise, fit
 the image into the dimensions given by --pagesize.  FIT is one of into, fill,
 exact, shrink and enlarge. The default value is "into". See the epilogue at the
 bottom for a description of the FIT options.
-
 ''')
     sizeargs.add_argument(
             '-a', '--auto-orient', action="store_true",
@@ -1516,6 +1595,14 @@ If both dimensions of the page are given via --pagesize, conditionally swaps
 these dimensions such that the page orientation is the same as the orientation
 of the input image. If the orientation of a page gets flipped, then so do the
 values set via the --border option.
+''')
+    sizeargs.add_argument(
+            '-j', '--justify', metavar='JUSTIFY', type=parse_justifyarg,
+            default=JustifyMode.center, help='''
+Justify the image if and only if enough space is present, horizontally and / or
+vertically. JUSTIFY is one of northwest, north, northeast, east, center, west,
+southeast, south, southwest or book. "book" iterates between "east" and "west"
+justification. The default is "center".
 ''')
 
     metaargs = parser.add_argument_group(title='Arguments setting metadata',
@@ -1596,8 +1683,15 @@ values set via the --border option.
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    layout_fun = get_layout_fun(args.pagesize, args.imgsize, args.border,
-                                args.fit, args.auto_orient)
+    if args.justify == JustifyMode.book:
+        # a book starts with odd pages in east position
+        layout_fun = [get_layout_fun(args.pagesize, args.imgsize, args.border,
+                        args.fit, args.auto_orient, JustifyMode.east),
+                    get_layout_fun(args.pagesize, args.imgsize, args.border,
+                        args.fit, args.auto_orient, JustifyMode.west)]
+    else:
+        layout_fun = get_layout_fun(args.pagesize, args.imgsize, args.border,
+                                    args.fit, args.auto_orient, args.justify)
 
     # if no positional arguments were supplied, read a single image from
     # standard input
