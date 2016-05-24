@@ -867,11 +867,11 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient, justify):
                 pagewidth, pageheight = pagesize[0], pagesize[1]
                 newborder = border
             if pagewidth is not None:
-                fitwidth = pagewidth-2*newborder[0]
+                fitwidth = pagewidth-2*newborder[1]
             else:
                 fitwidth = None
             if pageheight is not None:
-                fitheight = pageheight-2*newborder[1]
+                fitheight = pageheight-2*newborder[0]
             else:
                 fitheight = None
             if fit in [FitMode.fill, FitMode.enlarge] and \
@@ -892,10 +892,8 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient, justify):
                        fitwidth, fitheight)
             if pagewidth is None:
                 pagewidth = imgwidthpdf+border[1]*2
-                newborder[1] = border[1]
             if pageheight is None:
                 pageheight = imgheightpdf+border[0]*2
-                newborder[0] = border[0]
             # newborder is subject to auto_orient and needs to be respected
             imgxpdf, imgypdf = justify_image(justify, pagewidth, pageheight,
                 imgheightpdf, imgwidthpdf, newborder)
@@ -929,17 +927,16 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient, justify):
         return layout_fun
     if pagesize is not None and imgsize is not None:
         def layout_fun(imgwidthpx, imgheightpx, ndpi):
-            newborder = border
             if pagesize[0] is not None and pagesize[1] is not None and \
                     auto_orient and \
                     ((imgwidthpx > imgheightpx and
                       pagesize[0] < pagesize[1]) or
                      (imgwidthpx < imgheightpx and pagesize[0] > pagesize[1])):
                 pagewidth, pageheight = pagesize[1], pagesize[0]
-                newborder[0] = border[1]
-                newborder[1] = border[0]
+                newborder[0], newborder[1] = border[1], border[0]
             else:
                 pagewidth, pageheight = pagesize[0], pagesize[1]
+                newborder = border
             imgwidthpdf, imgheightpdf = \
                 fitfun(fit, px_to_pt(imgwidthpx, ndpi[0]),
                        px_to_pt(imgheightpx, ndpi[1]),
