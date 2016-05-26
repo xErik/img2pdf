@@ -953,9 +953,8 @@ def get_layout_fun(pagesize, imgsize, border, fit, auto_orient, justify):
 def default_layout_fun(imgwidthpx, imgheightpx, ndpi):
     imgwidthpdf = pagewidth = px_to_pt(imgwidthpx, ndpi[0])
     imgheightpdf = pageheight = px_to_pt(imgheightpx, ndpi[1])
-    # image is centered, border is ignored
-    imgxpdf, imgypdf = justify_image(JustifyMode.center, pagewidth, pageheight,
-        imgheightpdf, imgwidthpdf, (0,0))
+    imgxpdf=(pagewidth - imgwidthpdf)/2.0
+    imgypdf=(pageheight - imgheightpdf)/2.0
     return pagewidth, pageheight, imgwidthpdf, imgheightpdf, imgxpdf, imgypdf
 
 
